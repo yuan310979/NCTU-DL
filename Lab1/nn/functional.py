@@ -10,6 +10,12 @@ def sigmoid(x):
 def derivative_sigmoid(x):
     return np.multiply(x, 1.0 - x)
 
+def mse_loss(y_pred, y):
+    return (y_pred - y) ** 2
+
+def derivative_mse_loss(y_pred, y):
+    return 1/2 * (y_pred - y)
+
 def cross_entropy_loss(y_pred, y):
     return -xlogy(y, y_pred) - xlogy(1-y, 1-y_pred) 
 
