@@ -47,7 +47,7 @@ When delta can represented as follow. <br><br>
 Then we continue to the L-1 layer. <br><br>
 ![](https://i.imgur.com/mGSDwD3.png) <br><br>
 When delta can represent as follow. <br><br>
-![](https://i.imgur.com/qkWiBXQ.png) <br><br>
+![](https://i.imgur.com/hKCgFuT.png) <br><br>
 Therefore, we can generalize this equation with recurrence fashion, which propagate “error” from the last layer to the beginning of the model layer.<br><br>
 ![](https://i.imgur.com/0aCMwcb.png)<br>
 ![](https://i.imgur.com/RbDR2wY.png)<br>
