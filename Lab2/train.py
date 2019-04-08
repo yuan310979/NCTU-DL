@@ -7,6 +7,7 @@ import numpy as np
 from tqdm import trange
 from pathlib import Path
 from EEGNet import EEGNet
+from DeepConvNet import  DeepConvNet
 from torch.utils.data import TensorDataset, DataLoader
 
 def save_checkpoint(state, filename):
@@ -16,6 +17,7 @@ def save_checkpoint(state, filename):
 parser = argparse.ArgumentParser(description=f'Runnning EEG Classification')
 parser.add_argument('-a', '--activation-function', default="ReLU", type=str, help="desired type of activation function")
 parser.add_argument('-b', '--batch-size', default=64, type=int, help="mini-batch size(default=64)")
+parser.add_argument('-m', '--model', default="EEGNet", type=str, help="select model")
 parser.add_argument('--epochs', default=300, type=int, help="number of total epochs to run")
 parser.add_argument('--lr', '--learning-rate', default=1e-2, type=float, help="initial learning rate")
 parser.add_argument('--checkpoint', type=str, help="name of checkpoint file")
@@ -35,13 +37,23 @@ train_dataset = TensorDataset(train_X, train_y)
 train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size) 
 
 # Construct desired model
-model = EEGNet(activation_function = args.activation_function) 
-if Path(CHECKPOINT).exists():
-    print()
+model = None
+if args.model == "EEGNet":
+    model = EEGNet(activation_function = args.activation_function) 
+elif args.model == "DeepConvNet":
+    model = DeepConvNet(activation_function=args.activation_function)
 
 # Construct loss function and optimizer
 criterion = torch.nn.CrossEntropyLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+
+# Load weight file if exists
+if Path(CHECKPOINT).exists():
+    print(f"Weight File {args.checkpoint} exists.")
+    print(f"=> Loading checkpoint '{args.checkpoint}'")
+    checkpoint = torch.load(args.checkpoint)
+    model.load_state_dict(checkpoint['state_dict'])
+    optimizer.load_state_dict(checkpoint['optimizer'])
 
 # Result
 train_accs = []
