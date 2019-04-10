@@ -15,11 +15,12 @@ def save_checkpoint(state, filename):
 
 # Argparse
 parser = argparse.ArgumentParser(description=f'Runnning EEG Classification')
-parser.add_argument('-a', '--activation-function', default="ReLU", type=str, help="desired type of activation function")
-parser.add_argument('-b', '--batch-size', default=64, type=int, help="mini-batch size(default=64)")
+parser.add_argument('-a', '--activation-function', default="LeakyReLU", type=str, help="desired type of activation function")
+parser.add_argument('-b', '--batch-size', default=2048, type=int, help="mini-batch size(default=64)")
 parser.add_argument('-m', '--model', default="EEGNet", type=str, help="select model")
-parser.add_argument('--epochs', default=300, type=int, help="number of total epochs to run")
-parser.add_argument('--lr', '--learning-rate', default=1e-2, type=float, help="initial learning rate")
+parser.add_argument('--wd', default='1e-2', type=float, help="weight_decay(L2 penalty)")
+parser.add_argument('--epochs', default=3000, type=int, help="number of total epochs to run")
+parser.add_argument('--lr', '--learning-rate', default=1e-3, type=float, help="initial learning rate")
 parser.add_argument('--checkpoint', type=str, help="name of checkpoint file")
 args = parser.parse_args()
 
@@ -45,7 +46,7 @@ elif args.model == "DeepConvNet":
 
 # Construct loss function and optimizer
 criterion = torch.nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.wd)
 
 # Load weight file if exists
 if Path(CHECKPOINT).exists():
@@ -101,7 +102,7 @@ with trange(args.epochs) as epochs:
             total = test_X.shape[0]
             test_acc = 100 * correct / total
             test_accs.append(test_acc)
-            epochs.set_description('[Accuracy:{:.6f} {:.6f}]'.format(train_acc, test_acc))
+            epochs.set_description('[Accuracy:{:.6f} {:.6f} {:.6f}]'.format(train_acc, test_acc, best_test_acc))
 
             if test_acc > best_test_acc:
                 save_checkpoint({
