@@ -6,11 +6,11 @@ EEG_relu = None
 EEG_lrelu = None
 EEG_elu = None
 
-with open("./result/EEGNet_ReLU_result", "rb") as f:
+with open("./result/EEGNet/EEGNet_ReLU_2048_0.01_result", "rb") as f:
     EEG_relu = torch.load(f)
-with open("./result/EEGNet_LeakyReLU_result", "rb") as f:
+with open("./result/EEGNet/EEGNet_LeakyReLU_2048_0.001_result", "rb") as f:
     EEG_lrelu = torch.load(f)
-with open("./result/EEGNet_ELU_result", "rb") as f:
+with open("./result/EEGNet/EEGNet_ELU_2048_0.01_result", "rb") as f:
     EEG_elu = torch.load(f)
  
 plt.figure(figsize=(30,24))
