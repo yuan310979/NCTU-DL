@@ -51,7 +51,6 @@ class DeepConvNet(nn.Module):
         )
 
     def forward(self, X):
-        X = torch.Tensor(X)
         X = self.layer1(X)
         X = self.layer2(X)
         X = self.layer3(X)
