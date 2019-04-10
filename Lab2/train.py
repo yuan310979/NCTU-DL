@@ -34,7 +34,7 @@ test_y = torch.from_numpy(np.array(test_y)).long()
 
 # DataLoader
 train_dataset = TensorDataset(train_X, train_y)
-train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size) 
+train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size)
 
 # Construct desired model
 model = None
@@ -55,6 +55,12 @@ if Path(CHECKPOINT).exists():
     model.load_state_dict(checkpoint['state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer'])
 
+# Use GPU to do training if available
+if torch.cuda.is_available():
+    print("=> Use GPU on training...")
+    model = model.cuda()
+    criterion = criterion.cuda()
+
 # Result
 train_accs = []
 test_accs = []
@@ -64,6 +70,9 @@ with trange(args.epochs) as epochs:
     for epoch in epochs:
         with trange(len(train_dataloader)) as t:
             for X_data, y_data in train_dataloader:
+                if torch.cuda.is_available():
+                    X_data = X_data.cuda()
+                    y_data = y_data.cuda()
                 y_pred = model(X_data)
                 loss = criterion(y_pred, y_data)
 
@@ -74,6 +83,8 @@ with trange(args.epochs) as epochs:
                 t.set_description('[loss:{:.6f}]'.format(loss.item()))
                 t.update()
             # Train accuracy with respect to training data
+            train_X = train_X.cuda()
+            train_y = train_y.cuda()
             y_pred = model(train_X)
             y_pred = torch.argmax(y_pred, dim=1)
             correct = torch.sum(y_pred == train_y).item()
@@ -82,6 +93,8 @@ with trange(args.epochs) as epochs:
             train_accs.append(train_acc)
 
             # Test accuracy with respect to testing data
+            test_X = test_X.cuda()
+            test_y = test_y.cuda()
             y_pred = model(test_X)
             y_pred = torch.argmax(y_pred, dim=1)
             correct = torch.sum(y_pred == test_y).item()
@@ -99,6 +112,7 @@ with trange(args.epochs) as epochs:
                     'train_acc': train_acc,
                     'test_acc': test_acc
                     }, CHECKPOINT)
+                best_test_acc = test_acc
 
 torch.save({
     'train_acc': train_accs,

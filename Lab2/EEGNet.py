@@ -36,7 +36,7 @@ class EEGNet(nn.Module):
                         )
 
     def forward(self, X):
-        X = torch.Tensor(X)
+        #  X = torch.Tensor(X)
         X = self.firstconv(X)
         X = self.depthwiseConv(X)
         X = self.separableConv(X)
