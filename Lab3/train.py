@@ -1,15 +1,22 @@
 import torch
 import argparse
 import dataloader
+import torchvision
 
+from torch import nn
 from model import resnet
 from tqdm import tqdm, trange
 from torch.utils.data import DataLoader
 
+def save_checkpoint(state, filename):
+    torch.save(state, filename)
+
+num_classes = 5
+
 # Argparse
 parser = argparse.ArgumentParser(description=f'Runnning Resnet Classification')
-parser.add_argument('-b', '--batch-size', default=64, type=int, help="mini-batch size(default=64)")
-parser.add_argument('-m', '--model', default="ResNet18", type=str, help="model type")
+parser.add_argument('-b', '--batch-size', default=4, type=int, help="mini-batch size(default=64)")
+parser.add_argument('-m', '--model', default="ResNet18_Pretrain", type=str, help="model type")
 parser.add_argument('--mo', default=0.9, type=float, help="momentum of optimizer")
 parser.add_argument('--wd', default='5e-4', type=float, help="weight_decay(L2 penalty)")
 parser.add_argument('--epochs', default=10, type=int, help="number of total epochs to run")
@@ -20,21 +27,40 @@ args = parser.parse_args()
 # DataLoader
 train_dataset = dataloader.RetinopathyLoader("./data/", 'train')
 train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size)
+test_dataset = dataloader.RetinopathyLoader("./data/", 'test')
+test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size)
 
 # Model
 model = None
 if args.model == "ResNet18":
+    print('Use ResNet18')
     model = resnet.resnet18(num_classes=5)
+elif args.model == "ResNet50":
+    print('Use ResNet50')
+    model = resnet.resnet50(num_classes=5)
+elif args.model == "ResNet18_Pretrain":
+    print('Use ResNet18 Pretrain')
+    model = torchvision.models.resnet18(pretrained=True)
+    num_ftrs = model.fc.in_features
+    model.avgpool = nn.AdaptiveAvgPool2d(1)
+    model.fc = nn.Linear(num_ftrs, num_classes)
+elif args.model == "ResNet50_Pretrain":
+    print('Use ResNet50 Pretrain')
+    model = torchvision.models.resnet50(pretrained=True)
+    num_ftrs = model.fc.in_features
+    model.avgpool = nn.AdaptiveAvgPool2d(1)
+    model.fc = nn.Linear(num_ftrs, num_classes)
 
 # Construct loss function and optimizer
 criterion = torch.nn.CrossEntropyLoss()
-optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.wd, momentum=args.mo)
 
 # Use GPU to do training if available
 if torch.cuda.is_available():
     print("=> Use GPU on training...")
     model = model.cuda()
     criterion = criterion.cuda()
+
+optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.wd, momentum=args.mo)
 
 # Result
 train_accs = []
@@ -57,29 +83,31 @@ with trange(args.epochs) as epochs:
 
                 t.set_description('[loss:{:.6f}]'.format(loss.item()))
                 t.update()
-                exit()
             # Train accuracy with respect to training data
-            if torch.cuda.is_available():
-                train_X = train_X.cuda()
-                train_y = train_y.cuda()
-            y_pred = model(train_X)
-            y_pred = torch.argmax(y_pred, dim=1)
-            correct = torch.sum(y_pred == train_y).item()
-            total = train_X.shape[0]
-            train_acc = 100 * correct / total
+            train_correct = 0
+            for train_X, train_y in train_dataloader:
+                if torch.cuda.is_available():
+                    train_X = train_X.cuda()
+                    train_y = train_y.cuda()
+                y_pred = model(train_X)
+                y_pred = torch.argmax(y_pred, dim=1)
+                train_correct += torch.sum(y_pred == train_y).item()
+            total = len(train_dataset)  
+            train_acc = 100 * train_correct / total
             train_accs.append(train_acc)
 
             # Test accuracy with respect to testing data
-            if torch.cuda.is_available():
-                test_X = test_X.cuda()
-                test_y = test_y.cuda()
-            y_pred = model(test_X)
-            y_pred = torch.argmax(y_pred, dim=1)
-            correct = torch.sum(y_pred == test_y).item()
-            total = test_X.shape[0]
-            test_acc = 100 * correct / total
+            test_correct = 0
+            for test_X, test_y in test_dataloader:
+                if torch.cuda.is_available():
+                    test_X = test_X.cuda()
+                    test_y = test_y.cuda()
+                y_pred = model(test_X)
+                y_pred = torch.argmax(y_pred, dim=1)
+                test_correct += torch.sum(y_pred == test_y).item()
+            total = len(test_dataset) 
+            test_acc = 100 * test_correct / total
             test_accs.append(test_acc)
-            epochs.set_description('[Accuracy:{:.6f} {:.6f} {:.6f}]'.format(train_acc, test_acc, best_test_acc))
 
             if test_acc > best_test_acc:
                 save_checkpoint({
@@ -89,10 +117,12 @@ with trange(args.epochs) as epochs:
                     'loss': loss,
                     'train_acc': train_acc,
                     'test_acc': test_acc
-                    }, CHECKPOINT)
+                    }, args.checkpoint)
                 best_test_acc = test_acc
+
+            epochs.set_description('[Accuracy:{:.6f} {:.6f} {:.6f}]'.format(train_acc, test_acc, best_test_acc))
 
 torch.save({
     'train_acc': train_accs,
     'test_acc': test_accs
-    }, CHECKPOINT + "_result")
+    }, args.checkpoint + "_result")

@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 
+from PIL import Image
 from skimage import io
 from torch.utils import data
 from torchvision import transforms
@@ -54,12 +55,13 @@ class RetinopathyLoader(data.Dataset):
             step4. Return processed image and label
         """
         train_transform = transforms.Compose([
+            transforms.RandomHorizontalFlip(p=0.5),
             transforms.ToTensor()
         ])
 
         path = self.root + self.img_name[index] + '.jpeg'
 
-        img = io.imread(path)
+        img = Image.open(path)
         img = train_transform(img)
 
         label = self.label[index]
