@@ -56,13 +56,23 @@ class RetinopathyLoader(data.Dataset):
         """
         train_transform = transforms.Compose([
             transforms.RandomHorizontalFlip(p=0.5),
+            transforms.RandomVerticalFlip(p=0.5),
+            transforms.ColorJitter(0.05, 0.05, 0.05, 0.05),
+            transforms.ToTensor()
+        ])
+        
+        test_transform = transforms.Compose([
             transforms.ToTensor()
         ])
 
         path = self.root + self.img_name[index] + '.jpeg'
 
         img = Image.open(path)
-        img = train_transform(img)
+
+        if self.mode == "train":
+            img = train_transform(img)
+        elif self.mode == "test":
+            img = test_transform(img)
 
         label = self.label[index]
 
