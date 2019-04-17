@@ -7,6 +7,8 @@ from torch import nn
 from model import resnet
 from tqdm import tqdm, trange
 from torch.utils.data import DataLoader
+from criterion.loss import QWKLoss
+from pathlib import Path
 
 def save_checkpoint(state, filename):
     torch.save(state, filename)
@@ -15,13 +17,14 @@ num_classes = 5
 
 # Argparse
 parser = argparse.ArgumentParser(description=f'Runnning Resnet Classification')
-parser.add_argument('-b', '--batch-size', default=4, type=int, help="mini-batch size(default=64)")
-parser.add_argument('-m', '--model', default="ResNet18_Pretrain", type=str, help="model type")
+parser.add_argument('-b', '--batch-size', default=8, type=int, help="mini-batch size(default=64)")
+parser.add_argument('-m', '--model', default="ResNet50_Pretrain", type=str, help="model type")
 parser.add_argument('--mo', default=0.9, type=float, help="momentum of optimizer")
 parser.add_argument('--wd', default='5e-4', type=float, help="weight_decay(L2 penalty)")
 parser.add_argument('--epochs', default=10, type=int, help="number of total epochs to run")
 parser.add_argument('--lr', '--learning-rate', default=1e-3, type=float, help="initial learning rate")
 parser.add_argument('--checkpoint', type=str, help="name of checkpoint file")
+parser.add_argument('--resume', type=str, help="name of checkpoint file")
 args = parser.parse_args()
 
 # DataLoader
@@ -53,6 +56,8 @@ elif args.model == "ResNet50_Pretrain":
 
 # Construct loss function and optimizer
 criterion = torch.nn.CrossEntropyLoss()
+#  criterion = QWKLoss(n_classes=5)
+
 
 # Use GPU to do training if available
 if torch.cuda.is_available():
@@ -61,14 +66,25 @@ if torch.cuda.is_available():
     criterion = criterion.cuda()
 
 optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.wd, momentum=args.mo)
+#  optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.wd)
 
 # Result
 train_accs = []
 test_accs = []
 best_test_acc = 0
 
+if args.resume is not None and Path(args.resume).exists():
+    print(f"Weight File {args.resume} exists.")
+    print(f"=> Loading checkpoint '{args.resume}'")
+    checkpoint = torch.load(args.resume)
+    model.load_state_dict(checkpoint['state_dict'])
+    #  optimizer.load_state_dict(checkpoint['optimizer'])
+    best_test_acc = checkpoint['test_acc']
+    print(f"Best: {best_test_acc}")
+
 with trange(args.epochs) as epochs:
     for epoch in epochs:
+        optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.wd, momentum=args.mo)
         with trange(len(train_dataloader)) as t:
             for X_data, y_data in train_dataloader:
                 if torch.cuda.is_available():
@@ -119,10 +135,13 @@ with trange(args.epochs) as epochs:
                     'test_acc': test_acc
                     }, args.checkpoint)
                 best_test_acc = test_acc
+            else:
+                args.lr = args.lr / 10
+                print(f"Change learning rate to {args.lr}")
 
             epochs.set_description('[Accuracy:{:.6f} {:.6f} {:.6f}]'.format(train_acc, test_acc, best_test_acc))
 
-torch.save({
-    'train_acc': train_accs,
-    'test_acc': test_accs
-    }, args.checkpoint + "_result")
+            torch.save({
+                'train_acc': train_accs,
+                'test_acc': test_accs
+                }, args.checkpoint + "_result")
