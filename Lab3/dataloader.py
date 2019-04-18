@@ -2,7 +2,6 @@ import numpy as np
 import pandas as pd
 
 from PIL import Image
-from skimage import io
 from torch.utils import data
 from torchvision import transforms
 
