@@ -84,7 +84,6 @@ if args.resume is not None and Path(args.resume).exists():
 
 with trange(args.epochs) as epochs:
     for epoch in epochs:
-        optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.wd, momentum=args.mo)
         with trange(len(train_dataloader)) as t:
             for X_data, y_data in train_dataloader:
                 if torch.cuda.is_available():
@@ -135,9 +134,6 @@ with trange(args.epochs) as epochs:
                     'test_acc': test_acc
                     }, args.checkpoint)
                 best_test_acc = test_acc
-            else:
-                args.lr = args.lr / 10
-                print(f"Change learning rate to {args.lr}")
 
             epochs.set_description('[Accuracy:{:.6f} {:.6f} {:.6f}]'.format(train_acc, test_acc, best_test_acc))
 
