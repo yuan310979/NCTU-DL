@@ -91,7 +91,6 @@ if args.resume is not None and Path(args.resume).exists():
 
 with trange(args.epochs) as epochs:
     for epoch in epochs:
-        optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.wd, momentum=args.mo)
         with trange(len(train_dataloader)) as t:
             for X_data, y_data in train_dataloader:
                 if torch.cuda.is_available():
