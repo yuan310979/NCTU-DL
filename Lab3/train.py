@@ -7,7 +7,6 @@ from torch import nn
 from model import resnet
 from tqdm import tqdm, trange
 from torch.utils.data import DataLoader
-from criterion.loss import QWKLoss
 from pathlib import Path
 
 def save_checkpoint(state, filename):
@@ -29,7 +28,7 @@ args = parser.parse_args()
 
 # DataLoader
 train_dataset = dataloader.RetinopathyLoader("./data/", 'train')
-train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size)
+train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
 test_dataset = dataloader.RetinopathyLoader("./data/", 'test')
 test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size)
 
@@ -37,10 +36,18 @@ test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size)
 model = None
 if args.model == "ResNet18":
     print('Use ResNet18')
-    model = resnet.resnet18(num_classes=5)
+    #  model = resnet.resnet18(num_classes=5)
+    model = torchvision.models.resnet18()
+    num_ftrs = model.fc.in_features
+    model.avgpool = nn.AdaptiveAvgPool2d(1)
+    model.fc = nn.Linear(num_ftrs, num_classes)
 elif args.model == "ResNet50":
     print('Use ResNet50')
-    model = resnet.resnet50(num_classes=5)
+    #  model = resnet.resnet50(num_classes=5)
+    model = torchvision.models.resnet50()
+    num_ftrs = model.fc.in_features
+    model.avgpool = nn.AdaptiveAvgPool2d(1)
+    model.fc = nn.Linear(num_ftrs, num_classes)
 elif args.model == "ResNet18_Pretrain":
     print('Use ResNet18 Pretrain')
     model = torchvision.models.resnet18(pretrained=True)
