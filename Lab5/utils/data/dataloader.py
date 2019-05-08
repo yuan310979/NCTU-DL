@@ -37,9 +37,7 @@ def normalizeString(s):
     s = re.sub(r"[^a-zA-Z.!?]+", r" ", s)
     return s
 
-def readLangs(lang1, lang2, path):
-    print("Reading lines...")
-
+def readLangs(lang, path):
     # Read the file and split into lines
     lines = open(path, encoding='utf-8').\
         read().strip().split('\n')
@@ -47,20 +45,18 @@ def readLangs(lang1, lang2, path):
     # Split every line into pairs and normalize
     pairs = [[normalizeString(s) for s in l.split(' ')] for l in lines]
 
-    input_lang = Lang(lang1)
-    output_lang = Lang(lang2)
+    input_lang = Lang(lang)
 
-    return input_lang, output_lang, pairs
+    return input_lang, pairs
 
-def prepareData(lang1, lang2, path):
-    input_lang, output_lang, pairs = readLangs(lang1, lang2, path)
-    print("Read %s sentence pairs" % len(pairs))
+def prepareData(lang, path):
+    input_lang, pairs = readLangs(lang, path)
+    print("Read %s words sequences" % len(pairs))
     print("Trimmed to %s sentence pairs" % len(pairs))
     print("Counting words...")
     for pair in pairs:
-        input_lang.addWord(pair[0])
-        output_lang.addWord(pair[1])
+        for p in pair:
+            input_lang.addWord(p)
     print("Counted words:")
     print(input_lang.name, input_lang.n_words)
-    print(output_lang.name, output_lang.n_words)
-    return input_lang, output_lang, pairs
+    return input_lang, pairs

@@ -2,6 +2,7 @@ import re
 import time
 import string
 import random
+import itertools
 
 import torch
 import torch.nn as nn
@@ -9,9 +10,22 @@ from torch import optim
 import torch.nn.functional as F
 
 from utils.time import timeSince
-from utils.data.dataloader import prepareData
+from utils.data.dataloader import prepareData, readLangs
 from nn.module.encoder import EncoderRNN 
-from nn.module.decoder import DecoderRNN, AttnDecoderRNN
+from nn.module.decoder import DecoderRNN
+from nltk.translate.bleu_score import SmoothingFunction, sentence_bleu
+from model import CVAE
+
+idx2tense = {0: 'sp', 1:'tp', 2:'pg', 3:'p'}
+#  tense2oh = {'sp': [1, 0, 0, 0, 1, 0, 0, 0], 
+         #  'tp': [0, 1, 0, 0, 0, 1, 0, 0],
+         #  'pg': [0, 0, 1, 0, 0, 0, 1, 0],
+         #  'p': [0, 0 , 0, 1, 0, 0 , 0, 1]}
+
+tense2index = {'sp': 0, 
+         'tp': 1,
+         'pg': 2,
+         'p': 3}
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -19,7 +33,9 @@ SOS_token = 0
 EOS_token = 1
 MAX_LENGTH = 20
 
-input_lang, output_lang, pairs = prepareData('prev', 'next', "./data/train.txt")
+input_lang, pairs = prepareData('lang', "./data/train.txt")
+torch.save(input_lang, "lang_class.pth")
+
 print(random.choice(pairs))
 
 def indexesFromWord(lang, word):
@@ -30,139 +46,140 @@ def tensorFromWord(lang, word):
     indexes.append(EOS_token)
     return torch.tensor(indexes, dtype=torch.long, device=device).view(-1, 1)
 
-def tensorsFromPair(pair):
-    input_tensor = tensorFromWord(input_lang, pair[0])
-    target_tensor = tensorFromWord(output_lang, pair[1])
-    return (input_tensor, target_tensor)
+def tensorFromTense(tense):
+    input_c = tense2index[tense]
+    input_c = torch.tensor(input_c, dtype=torch.long, device=device).view(1, -1)
+    return input_c
 
-######################################################################
-# Training the Model
-# ------------------
-#
-# To train we run the input sentence through the encoder, and keep track
-# of every output and the latest hidden state. Then the decoder is given
-# the ``<SOS>`` token as its first input, and the last hidden state of the
-# encoder as its first hidden state.
-#
-# "Teacher forcing" is the concept of using the real target outputs as
-# each next input, instead of using the decoder's guess as the next input.
-# Using teacher forcing causes it to converge faster but `when the trained
-# network is exploited, it may exhibit
-# instability <http://minds.jacobs-university.de/sites/default/files/uploads/papers/ESNTutorialRev.pdf>`__.
-#
-# You can observe outputs of teacher-forced networks that read with
-# coherent grammar but wander far from the correct translation -
-# intuitively it has learned to represent the output grammar and can "pick
-# up" the meaning once the teacher tells it the first few words, but it
-# has not properly learned how to create the sentence from the translation
-# in the first place.
-#
-# Because of the freedom PyTorch's autograd gives us, we can randomly
-# choose to use teacher forcing or not with a simple if statement. Turn
-# ``teacher_forcing_ratio`` up to use more of it.
-#
+#  def tensorFromIdx(idx):
+    #  input_c = tense2oh[idx2tense[idx]]
+    #  input_c = torch.tensor(input_c, dtype=torch.float, device=device).view(1, 1, -1)
+    #  return input_c
 
-teacher_forcing_ratio = 0.5
+def tensorsFromPair(pair, random=True):
+    if random == True:
+        idx = np.random.randint(0, 4, 1)[0]
+        tense = idx2tense[idx]
+        #  input_c = torch.tensor(tense2oh[tense], dtype=torch.long, device=device).view(-1, 1)
+        input_c = torch.tensor(tense2index[tense], dtype=torch.long, device=device).view(-1, 1)
+        input_tensor = tensorFromWord(input_lang, pair[idx])
 
+    return (input_tensor, input_tensor), (input_c, input_c)
 
-def train(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, decoder_optimizer, criterion, max_length=MAX_LENGTH):
-    encoder_hidden = encoder.initHidden(device)
+def loss_func(x, y, mu, logvar):
+    CE = F.cross_entropy(x, y)
+    KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+    return CE, KLD 
 
-    encoder_optimizer.zero_grad()
-    decoder_optimizer.zero_grad()
+def bleu_score(a, b):
+    cc = SmoothingFunction()
+    bl = sentence_bleu([a], b, smoothing_function=cc.method1)
+    return bl
 
-    input_length = input_tensor.size(0)
-    target_length = target_tensor.size(0)
+def reparameterize(mu, logvar):
+    std = torch.exp(0.5*logvar) 
+    eps = torch.randn_like(std)
+    return mu + eps * std
 
-    encoder_outputs = torch.zeros(max_length, encoder.hidden_size, device=device)
+teacher_forcing_ratio = 0.5 
 
-    loss = 0
+def train(input_tensor, target_tensor, input_c, target_c, model, optimizer, criterion, weight, max_length=MAX_LENGTH):
+    optimizer.zero_grad()
 
-    for ei in range(input_length):
-        encoder_output, encoder_hidden = encoder(
-            input_tensor[ei], encoder_hidden)
-        encoder_outputs[ei] = encoder_output[0, 0]
+    input_c = input_c.long().view(1, -1)
+    input_length = input_tensor.shape[0]
 
-    decoder_input = torch.tensor([[SOS_token]], device=device)
-
-    decoder_hidden = encoder_hidden
-
-    use_teacher_forcing = True if random.random() < teacher_forcing_ratio else False
-
-    if use_teacher_forcing:
-        # Teacher forcing: Feed the target as the next input
-        for di in range(target_length):
-            decoder_output, decoder_hidden, decoder_attention = decoder(
-                decoder_input, decoder_hidden, encoder_outputs)
-            loss += criterion(decoder_output, target_tensor[di])
-            decoder_input = target_tensor[di]  # Teacher forcing
-
-    else:
-        # Without teacher forcing: use its own predictions as the next input
-        for di in range(target_length):
-            decoder_output, decoder_hidden, decoder_attention = decoder(
-                decoder_input, decoder_hidden, encoder_outputs)
-            topv, topi = decoder_output.topk(1)
-            decoder_input = topi.squeeze().detach()  # detach from history as input
-
-            loss += criterion(decoder_output, target_tensor[di])
-            if decoder_input.item() == EOS_token:
-                break
-
+    ce_loss, kl_loss = model.train(input_tensor, input_c, loss_func) 
+    loss = ce_loss + kl_loss * weight
     loss.backward()
 
-    encoder_optimizer.step()
-    decoder_optimizer.step()
+    optimizer.step()
 
-    return loss.item() / target_length
+    return loss.item() / input_length, ce_loss.item() / input_length, kl_loss / input_length
 
+def kl_annealing(i):
+    weight = 0.0
+    if i > 30000:
+        i = i % 5000
+        weight = 1 / 5000 * i
+    return weight
+        
 
-######################################################################
-# The whole training process looks like this:
-#
-# -  Start a timer
-# -  Initialize optimizers and criterion
-# -  Create set of training pairs
-# -  Start empty losses array for plotting
-#
-# Then we call ``train`` many times and occasionally print the progress (%
-# of examples, time so far, estimated time) and average loss.
-#
-
-def trainIters(encoder, decoder, n_iters, print_every=1000, plot_every=100, learning_rate=0.01):
+def trainIters(model, n_iters, print_every=1000, plot_every=1, learning_rate=0.01):
     start = time.time()
     plot_losses = []
+    plot_kl_losses = []
+    plot_ce_losses = []
+    plot_bleu_score = []
     print_loss_total = 0  # Reset every print_every
     plot_loss_total = 0  # Reset every plot_every
+    best_bleu_score = 0
 
-    encoder_optimizer = optim.SGD(encoder.parameters(), lr=learning_rate)
-    decoder_optimizer = optim.SGD(decoder.parameters(), lr=learning_rate)
-    training_pairs = [tensorsFromPair(random.choice(pairs))
-                      for i in range(n_iters)]
+    optimizer = optim.SGD(model.parameters(), lr=learning_rate)
+
+    training_pairs = []
+    training_cs = []
+
+    for i in range(n_iters):
+        pair = random.choice(pairs)
+        tfp = tensorsFromPair(pair) 
+        training_pairs.append(tfp[0])
+        training_cs.append(tfp[1])
+
     criterion = nn.CrossEntropyLoss()
 
     for iter in range(1, n_iters + 1):
         training_pair = training_pairs[iter - 1]
+        training_c = training_cs[iter - 1]
+
         input_tensor = training_pair[0]
         target_tensor = training_pair[1]
 
-        loss = train(input_tensor, target_tensor, encoder,
-                     decoder, encoder_optimizer, decoder_optimizer, criterion)
+        input_c = training_c[0]
+        target_c = training_c[1]
+
+        loss, ce_loss, kl_loss = train(input_tensor, target_tensor, input_c, target_c, model, optimizer, criterion, kl_annealing(iter))
         print_loss_total += loss
         plot_loss_total += loss
+
+        bleu = evaluateByTestData(model)
+        if best_bleu_score < bleu:
+            best_bleu_score = bleu
 
         if iter % print_every == 0:
             print_loss_avg = print_loss_total / print_every
             print_loss_total = 0
             print('%s (%d %d%%) %.4f' % (timeSince(start, iter / n_iters),
                                          iter, iter / n_iters * 100, print_loss_avg))
+            print("BestBleu: {:.4f}".format(best_bleu_score))
+            print("Bleu: {:.4f}".format(bleu))
 
         if iter % plot_every == 0:
             plot_loss_avg = plot_loss_total / plot_every
             plot_losses.append(plot_loss_avg)
+            plot_kl_losses.append(kl_loss.item())
+            plot_ce_losses.append(ce_loss)
+            plot_bleu_score.append(bleu)
             plot_loss_total = 0
 
+        if bleu > 0.7:
+            save_checkpoint({
+                'state_dict': model.state_dict(),
+                'optimizer': optimizer.state_dict(),
+                'bleu': bleu,
+                'ce_loss': ce_loss,
+                'kl_loss': kl_loss
+            }, f'./checkpoint/{bleu}_{iter}.pth')
+
     showPlot(plot_losses)
+
+    torch.save({
+        'kl_loss': plot_kl_losses,
+        'ce_loss': plot_ce_losses,
+        'loss': plot_losses,
+        'bleu_score': plot_bleu_score 
+    }, "plot_result2")
+
 
 
 ######################################################################
@@ -188,96 +205,53 @@ def showPlot(points):
     plt.plot(points)
 
 
-######################################################################
-# Evaluation
-# ==========
-#
-# Evaluation is mostly the same as training, but there are no targets so
-# we simply feed the decoder's predictions back to itself for each step.
-# Every time it predicts a word we add it to the output string, and if it
-# predicts the EOS token we stop there. We also store the decoder's
-# attention outputs for display later.
-#
-
-def evaluate(encoder, decoder, sentence, max_length=MAX_LENGTH):
+def evaluate(model, c_pair, word, max_length=MAX_LENGTH):
     with torch.no_grad():
-        input_tensor = tensorFromWord(input_lang, sentence)
-        input_length = input_tensor.size()[0]
-        encoder_hidden = encoder.initHidden(device)
+        input_tensor = tensorFromWord(input_lang, word)
+        input_c = tensorFromTense(c_pair[0])
+        target_c = tensorFromTense(c_pair[1])
 
-        encoder_outputs = torch.zeros(max_length, encoder.hidden_size, device=device)
+        decoded_idxs = model(input_tensor, input_c, target_c)
+        decoded_words = ''.join(input_lang.index2char[i] for i in decoded_idxs)
 
-        for ei in range(input_length):
-            encoder_output, encoder_hidden = encoder(input_tensor[ei],
-                                                     encoder_hidden)
-            encoder_outputs[ei] += encoder_output[0, 0]
+        return decoded_words
 
-        decoder_input = torch.tensor([[SOS_token]], device=device)  # SOS
+def evaluateByTestData(model):
+    _, pairs = readLangs("test_p", "./data/test.txt")
+    _, c_pairs = readLangs("test_c", "./data/test_c.txt")
 
-        decoder_hidden = encoder_hidden
-
-        decoded_words = []
-        decoder_attentions = torch.zeros(max_length, max_length)
-
-        for di in range(max_length):
-            decoder_output, decoder_hidden, decoder_attention = decoder(
-                decoder_input, decoder_hidden, encoder_outputs)
-            decoder_attentions[di] = decoder_attention.data
-            topv, topi = decoder_output.data.topk(1)
-            if topi.item() == EOS_token:
-                decoded_words.append('<EOS>')
-                break
-            else:
-                decoded_words.append(output_lang.index2char[topi.item()])
-
-            decoder_input = topi.squeeze().detach()
-
-        return decoded_words, decoder_attentions[:di + 1]
-
-
-######################################################################
-# We can evaluate random sentences from the training set and print out the
-# input, target, and output to make some subjective quality judgements:
-#
-
+    total_bleu_score = 0.0
+    for pair, c_pair in zip(pairs, c_pairs):
+        #  print('>', pair[0])
+        #  print('=', pair[1])
+        output_words = evaluate(model, c_pair, pair[0])
+        output_sentence = ''.join(output_words)
+        #  print('<', output_sentence)
+        #  print('')
+        total_bleu_score += bleu_score(pair[1], output_sentence)
+        _bleu_score = total_bleu_score / len(pairs)
+    #  print(f"Bleu Score: {_bleu_score}")
+    return _bleu_score
+        
 def evaluateRandomly(encoder, decoder, n=10):
     for i in range(n):
         pair = random.choice(pairs)
-        print('>', pair[0])
-        print('=', pair[1])
-        output_words, attentions = evaluate(encoder, decoder, pair[0])
+        idx = np.random.randint(0, 4)
+        print('>', pair[idx])
+        print('=', pair[idx])
+        output_words = evaluate(encoder, decoder, idx, pair[idx])
         output_sentence = ' '.join(output_words)
         print('<', output_sentence)
         print('')
 
+def save_checkpoint(state, filename):
+    torch.save(state, filename)
 
-######################################################################
-# Training and Evaluating
-# =======================
-#
-# With all these helper functions in place (it looks like extra work, but
-# it makes it easier to run multiple experiments) we can actually
-# initialize a network and start training.
-#
-# Remember that the input sentences were heavily filtered. For this small
-# dataset we can use relatively small networks of 256 hidden nodes and a
-# single GRU layer. After about 40 minutes on a MacBook CPU we'll get some
-# reasonable results.
-#
-# .. Note::
-#    If you run this notebook you can train, interrupt the kernel,
-#    evaluate, and continue training later. Comment out the lines where the
-#    encoder and decoder are initialized and run ``trainIters`` again.
-#
 
 hidden_size = 256
-encoder1 = EncoderRNN(input_lang.n_words, hidden_size).to(device)
-attn_decoder1 = AttnDecoderRNN(hidden_size, output_lang.n_words, dropout_p=0.1).to(device)
-#  model = CVAE(input_lang.n_words, hidden_size, output_lang.n_words)
+latent_size = 32 
+model = CVAE(input_lang.n_words, hidden_size, latent_size, input_lang.n_words).to(device)
 
-trainIters(encoder1, attn_decoder1, 10000, print_every=5000)
+trainIters(model, 100000, print_every=5000)
 
-######################################################################
-#
-
-evaluateRandomly(encoder1, attn_decoder1)
+evaluateByTestData(model)
