@@ -1,0 +1,10 @@
+sp p
+sp pg
+sp tp
+sp tp
+p tp
+sp pg
+p sp
+pg sp
+pg p
+pg tp
