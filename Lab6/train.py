@@ -15,21 +15,19 @@ plot_every = 100
 
 # unix-like command line setting 
 parser = argparse.ArgumentParser(description='InfoGan on MNIST dataset')
-parser.add_argument('-b', '--batch-size', default=8, type=int,
+parser.add_argument('-b', '--batch-size', default=64, type=int,
                 metavar='n',
-                help='mini-batch size (default: 8), this is the total '
+                help='mini-batch size (default: 64), this is the total '
                      'batch size of all gpus on the current node when '
                      'using data parallel or distributed data parallel')
-parser.add_argument('-j', '--workers', default=4, type=int, metavar='n',
-                help='number of data loading workers (default: 4)')
-parser.add_argument('--epochs', default=100, type=int, metavar='n',
+parser.add_argument('--epochs', default=80, type=int, metavar='n',
                 help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='n',
                 help='manual epoch number (useful on restarts)')
-parser.add_argument('--lr', '--learning-rate', default=5e-4, type=float,
-        metavar='lr', help='initial learning rate (default: 5e-4)', dest='lr')
-parser.add_argument('--wd', '--weight-decay', default=5e-4, type=float,
-                metavar='w', help='weight decay (default: 5e-4)')
+parser.add_argument('--lrg', '--learning-rate', default=1e-3, type=float,
+        metavar='lr', help='initial learning rate (default: 1e-3)')
+parser.add_argument('--lrd', '--weight-decay', default=2e-4, type=float,
+                help='initial learning rate (default: 2e-4)')
 parser.add_argument('--resume', default='', type=str, metavar='path',
                 help='path to latest checkpoint (default: none)')
 parser.add_argument('--gpu', default=0,
@@ -42,6 +40,8 @@ writer = SummaryWriter()
 # Cuda Settings
 cuda = True if torch.cuda.is_available() else False
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+if cuda:
+    torch.cuda.set_device(args.gpu)
 FloatTensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 LongTensor = torch.cuda.LongTensor if cuda else torch.LongTensor
 
@@ -52,7 +52,7 @@ transform = transforms.Compose([
 ])
 
 dataset = datasets.MNIST('./MNIST', train=True, transform=transform, target_transform=None, download=True)
-dataloder = torch.utils.data.DataLoader(dataset, batch_size=8, shuffle=True)
+dataloder = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
 
 netg = _netg(nz=64, ngf=64, nc=1).to(device)
 netd = _netd(ndf=64, nc=1).to(device)
@@ -60,9 +60,9 @@ netd = _netd(ndf=64, nc=1).to(device)
 criterionD = nn.BCELoss()
 criterionQ = nn.CrossEntropyLoss()
 
-optimizerD = optim.Adam(netd.parameters())
-optimizerG = optim.Adam(netg.parameters())
-optimizerInfo = optim.Adam([{'params': netg.parameters()}, {'params': netd.parameters()}])
+optimizerD = optim.Adam(netd.parameters(), lr=args.lrd)
+optimizerG = optim.Adam(netg.parameters(), lr=args.lrg)
+optimizerInfo = optim.Adam([{'params': netg.parameters()}, {'params': netd.parameters()}], lr=args.lrd)
 
 plot = 1
 
