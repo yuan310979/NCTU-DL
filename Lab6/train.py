@@ -11,6 +11,9 @@ from torchvision.utils import save_image
 from model.mnist_network import _netg, _netd
 from tensorboardX import SummaryWriter
 
+def save_checkpoint(state, filename):
+    torch.save(state, filename)
+
 plot_every = 100
 
 # unix-like command line setting 
@@ -30,7 +33,7 @@ parser.add_argument('--lrd', '--weight-decay', default=2e-4, type=float,
                 help='initial learning rate (default: 2e-4)')
 parser.add_argument('--resume', default='', type=str, metavar='path',
                 help='path to latest checkpoint (default: none)')
-parser.add_argument('--gpu', default=0,
+parser.add_argument('--gpu', default=0, type=int,
                 help='set gpu number')
 args = parser.parse_args()
 
@@ -88,13 +91,15 @@ with trange(args.start_epoch, args.epochs) as t:
                 fake_label = FloatTensor(np.zeros((batch_size, 1)))
                 real_label = FloatTensor(np.ones((batch_size, 1)))
 
+                # Generate noise _z, label condition c and concatenated noise z
+                fake_y = LongTensor(np.random.randint(0, 10, (batch_size)))
+                c = FloatTensor(generate_one_hot_by_label(fake_y, 10))
+                _z = FloatTensor(np.random.randn(batch_size, 54))
+                z = torch.cat((_z, c), 1)
+
                 """
                 Train Generator
                 """
-                # Generate noise _z, label condition c and concatenated noise z
-                _z = FloatTensor(np.random.randn(batch_size, 54))
-                c = FloatTensor(generate_random_one_hot(batch_size, 10))
-                z = torch.cat((_z, c), 1)
 
                 optimizerG.zero_grad()
 
@@ -110,9 +115,6 @@ with trange(args.start_epoch, args.epochs) as t:
                 Train Discriminator
                 """
                 # Generate noise _z, label condition c and concatenated noise z
-                _z = FloatTensor(np.random.randn(batch_size, 54))
-                c = FloatTensor(generate_random_one_hot(batch_size, 10))
-                z = torch.cat((_z, c), 1)
 
                 optimizerD.zero_grad()
 
@@ -130,16 +132,12 @@ with trange(args.start_epoch, args.epochs) as t:
                 Train Generator & Q-network via InfoLoss
                 """
                 # Generate noise _z, label condition c and concatenated noise z
-                _z = FloatTensor(np.random.randn(batch_size, 54))
-                c = FloatTensor(generate_one_hot_by_label(y, 10))
-                z = torch.cat((_z, c), 1)
-
                 fake_image3 = netg(z)
 
                 optimizerInfo.zero_grad()
 
                 Q_c = netd.forward_Q(fake_image3) 
-                info_loss = criterionQ(Q_c, y)
+                info_loss = criterionQ(Q_c, fake_y)
 
                 info_loss.backward()
                 optimizerInfo.step()
@@ -183,3 +181,14 @@ with trange(args.start_epoch, args.epochs) as t:
                 imgs = torch.stack(imgs)
                 img = plot_generated_image(imgs, 10, 10)
                 writer.add_image('Generate Image', img, epoch)
+
+            save_checkpoint({
+                'batch_size': args.batch_size,
+                'lrg': args.lrg,
+                'lrd': args.lrd,
+                'netg_state_dict': netg.state_dict(),
+                'netd_state_dict': netd.state_dict(),
+                'optimizerD': optimizerD.state_dict(),
+                'optimizerG': optimizerG.state_dict(),
+                'optimizerInfo': optimizerInfo.state_dict()
+            }, f"./checkpoint/{args.batch_size}_{args.lrg}_{args.lrd}.pth")
