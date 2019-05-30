@@ -34,6 +34,7 @@
 std::ostream& info = std::cout;
 std::ostream& error = std::cerr;
 std::ostream& debug = *(new std::ofstream);
+std::ofstream fout = std::ofstream("result");
 
 /**
  * 64-bit bitboard implementation for 2048
@@ -179,6 +180,10 @@ public:
 		if (num)
 			set(space[rand() % num], rand() % 10 ? 1 : 2);
 	}
+
+    void popupidx(int idx, int value){
+        set(idx, value);
+    }
 
 	/**
 	 * apply an action to the board
@@ -651,16 +656,37 @@ public:
 		info << std::endl;
 	}
 
+    float estimate(const board& b) const{
+        float value = 0.0;
+        for (feature* feat : feats) {
+            value += feat->estimate(b);
+        }
+        return value;
+    }
+
 	/**
 	 * accumulate the total value of given state
 	 */
-	float estimate(const board& b) const {
+	float evaluate(const board& b) const {
 		debug << "estimate " << std::endl << b;
-		float value = 0;
-		for (feature* feat : feats) {
-			value += feat->estimate(b);
-		}
-		return value;
+        int count = 0;
+        float value = 0.0;
+        for (int i = 0; i < 16; i++){
+            if(b.at(i) == 0){
+                count++;
+                board _board = board(b);
+                _board.popupidx(i, 1);
+                for (feature* feat : feats) {
+                    value += 0.9 * feat->estimate(_board);
+                }
+                _board = board(b);
+                _board.popupidx(i, 2);
+                for (feature* feat : feats) {
+                    value += 0.1 * feat->estimate(_board);
+                }
+            }
+        } 
+		return value / count;
 	}
 
 	/**
@@ -693,7 +719,7 @@ public:
 		state* best = after;
 		for (state* move = after; move != after + 4; move++) {
 			if (move->assign(b)) {
-				move->set_value(move->reward() + estimate(move->after_state()));
+				move->set_value(move->reward() + evaluate(move->after_state()));
 				if (move->value() > best->value())
 					best = move;
 			} else {
@@ -722,9 +748,9 @@ public:
 		float exact = 0;
 		for (path.pop_back() /* terminal state */; path.size(); path.pop_back()) {
 			state& move = path.back();
-			float error = exact - (move.value() - move.reward());
+			float error = exact - (estimate(move.before_state()) - move.reward());
 			debug << "update error = " << error << " for after state" << std::endl << move.after_state();
-			exact = move.reward() + update(move.after_state(), alpha * error);
+			exact = update(move.before_state(), alpha * error);
 		}
 	}
 
@@ -845,7 +871,7 @@ int main(int argc, const char* argv[]) {
 
 	// set the learning parameters
 	float alpha = 0.1;
-	size_t total = 100000;
+	size_t total = 1000000;
 	unsigned seed;
 	__asm__ __volatile__ ("rdtsc" : "=a" (seed));
 	info << "alpha = " << alpha << std::endl;
@@ -886,6 +912,7 @@ int main(int argc, const char* argv[]) {
 				break;
 			}
 		}
+        fout << score << std::endl;
 		debug << "end episode" << std::endl;
 
 		// update by TD(0)
@@ -895,7 +922,7 @@ int main(int argc, const char* argv[]) {
 	}
 
 	// store the model into file
-	tdl.save("");
+	tdl.save("model.pth");
 
 	return 0;
 }
